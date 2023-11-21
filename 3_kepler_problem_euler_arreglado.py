@@ -1,0 +1,237 @@
+"""
+A two-body code for modelling planetary orbits and
+binary stars. The user can vary the following parameters: 
+
+- M = primary mass [MSun]
+- m = secondary mass [MSun]
+- a = semimajor axis [AU] 
+- e = eccentricity
+
+- t = simulation time [yr]
+- d = timestep parameter (handles numerical precision)
+
+The code integrates the orbits using the Forward Euler method, 
+and produces a table with the time, energy conservation and 
+full phase space coordinates. 
+
+Unit system used:
+G=1, MSun=1, AU=1, which implies that 1 yr = 2*pi
+
+Command line example:
+python 3_kepler_problem_euler.py -M 1.0 -m 1.e-3 -a 1.0 -e 0.1 -t 4 -d 1e-3 -f table.out
+python 3_kepler_problem_euler.py -M 1.0 -m 0.5 -a 10.0 -e 0.7 -t 10 -d 1e-4 -f table.out
+"""
+
+"""
+Import Python packages. These are libraries that have useful functions.
+"""
+import sys, math, argparse
+import numpy as np
+from itertools import combinations
+
+"""
+We define an object (a star or a planet) with the following
+properties: mass, position (x, y, z), velocity (vx, vy, vz)
+and acceleration (ax, ay, az). It is very convenient to group
+these related quantities into a single object. Also, it allows
+us to ask a star: what is your mass? what is your position? etc.
+"""
+class Body(object): # Define a class called Body, which is a star or a planet
+    def __init__(self, mass, x, y, z, vx, vy, vz): # This function is called when a new Body is made
+        self.mass = mass # Set the mass 
+        self.position = [x, y, z] # Set the position
+        self.velocity = [vx, vy, vz] # Set the velocity
+        self.acceleration = [0.0, 0.0, 0.0] # Set initial acceleration to zero.
+
+        # An initial condition is completely specified by the masses,  positions and velocities. 
+        # The acceleration is calculated from these quantities. 
+
+"""
+Bodies is a list of bodies with methods to accelerate and
+evolve them. This includes the integration method; in this
+case the 1st order forward Euler method.
+"""
+class Bodies(list): # Define a class called Bodies, which is a list of Body objects
+    def calc_acceleration(self): # Function for calculating the accelerations
+        for b in self: # First set all accelerations to zero
+            b.acceleration = 0.0 
+ 
+        for b1, b2 in combinations(self, 2): # For every pair of objects
+            vector = np.subtract(b1.position, b2.position) # Calculate dx, dy, dz
+            distance = np.sqrt(np.sum(vector**2)) # Calculate distance = sqrt(dx**2 + dy**2 + dz**2)
+            b1.acceleration = b1.acceleration - (b2.mass/distance**3) * vector # Use Newton's equations of gravity and motion,
+            b2.acceleration = b2.acceleration + (b1.mass/distance**3) * vector # to calculate acceleration contributions. 
+ 
+    def update_positions(self, dt): # Function for updating the positions
+        for b in self:
+            b.position = b.position + b.velocity * dt # x = x0 + v0*dt  
+
+    def update_velocities(self, dt): # Function for updating the velocities
+        for b in self:
+            b.velocity = b.velocity + b.acceleration * dt # v = v0 + a0*dt
+
+    def step(self, dt): # This function is called to perform an integration step
+        self.calc_acceleration() # First calculate all accelerations
+        self.update_positions(dt) # Then update the positions
+        self.update_velocities(dt) # and the velocities.
+
+        # This sequence of calculations and updates represents the Forward Euler method. 
+        # It is very simple, but not very precise...
+
+    def calc_energy(self): # A function to calculate the total energy of the system
+        EK = 0. # Calculate the Kinetic Energy in the system
+        for b in self:
+            m = b.mass
+            v2 = np.sum(b.velocity**2)
+            EK += 0.5*m*v2 # ek = 0.5*m*v**2
+
+        EP = 0. # Calculate the total potential energy in the system
+        for b1, b2 in combinations(self, 2): # For every pair of objects
+            m1 = b1.mass # Get their masses
+            m2 = b2.mass
+            vector = np.subtract(b1.position, b2.position) # Calculate dx, dy, dz
+            r = np.sqrt(np.sum(vector**2)) # Calculate their mutual distance
+            EP -= m1*m2/r # ep = -m1*m2/r (Note that we set G=1)
+
+        E = EK + EP # Calculate the total energy
+        return E 
+
+    def centralize(self): # Function to set the center of mass to zero.
+        M = 0.            # Or in other words, transform to a coordinate frame
+                          # in which the center of mass is static. 
+                          # Center of mass is the mass weighted average position and velocity.
+        rcm = np.array([0., 0., 0.]) # Center of mass position array
+        vcm = np.array([0., 0., 0.]) # Center of mass velocity array
+        for b in self: # For every object
+            M += b.mass # Add mass to the total sum of masses
+            for i in range(3): 
+                rcm[i] += b.mass*b.position[i] # Add m*x, m*y, m*z
+                vcm[i] += b.mass*b.velocity[i] # ADd m*vx, m*vy, m*vz
+        for i in range(3):
+            rcm[i] /= M # And divide by the total mass
+            vcm[i] /= M
+
+        for b in self: # Perform the coordinate transformation by subtracting the center of mass coordiantes
+            b.position -= rcm
+            b.velocity -= vcm
+
+    def get_coordinates(self): # A function that returns an array of the
+        c = []                 # full phase space coordinates ({m, r, v})
+        for b in self:
+            c.append(b.mass)
+            for i in range(3):
+                c.append(b.position[i])
+            for i in range(3):
+                c.append(b.velocity[i])
+        return c
+
+"""
+Function to create a star+planet configuration
+"""
+def create_initial_condition(M, m, a, e): # Arguments are: M = primary mass
+                                          # m = secondary mass, a = semimajor axis
+                                          # e = eccentricity
+    mu = M+m # Total mass
+    E = -0.5*mu/a # Total energy (can be derived from a virial system E=EK+EP, 2*EK+EP=0
+                  # E = 0.5*EP
+    rp = a*(1.-e) # Pericenter distance
+    vp = math.sqrt( 2*(E + mu/rp) ) # Relative velocity at pericenter
+
+    star = Body(M, 0., 0., 0., 0., 0., 0.) # Put star at the origin
+    planet = Body(m, rp, 0., 0., 0., vp, 0.) # Put planet at pericenter
+
+    # So we have converted the orbital elements to Cartesian coordinates.
+    # We implemented the easiest option: pericenter (or apocenter is also possible).
+
+    b = Bodies() # Make the list of bodies
+    b.append(star) # Add the star
+    b.append(planet) # and planet
+
+    b.centralize() # Set the center of mass to zero
+
+    return b
+
+"""
+Function to read the command line arguments specified by the user.
+
+This allows us to give values to variables through the command line. 
+See the example commands in the header at top of this file. 
+"""
+def get_options():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-M", type=float, help="Primary mass in MSun", default=1.)
+    parser.add_argument("-m", type=float, help="Secondary mass in MSun", default=1.e-6)
+    parser.add_argument("-a", type=float, help="Semimajor axis in AU", default=1.0)
+    parser.add_argument("-e", type=float, help="Eccentricity", default=0.1)
+
+    parser.add_argument("-t", type=float, help="Simulation time in years", default=2.)
+    parser.add_argument("-d", type=float, help="Timestep parameter, i.e. dt = d*Period", default=1.e-2)
+
+    parser.add_argument("-f", type=str, help="Output file for the table", default="table.out")
+
+    args = parser.parse_args()
+    return args
+
+"""
+Main function: On execution, Python will look for this function and start from there.
+"""
+if __name__ == "__main__":
+    # Specifiy simulation parameters
+    opt = get_options() # Read the command line arguments
+
+    t_end = opt.t*2*math.pi # Simulation time in years (remember the 2*pi factor of the unit system, see header)
+    eta   = opt.d           # We define the timestep size as dt = eta*Period.
+                            # So the smaller eta, the smaller dt and the higher the precision.
+
+    # Create the initial condition
+    kepler_system = create_initial_condition(opt.M, opt.m, opt.a, opt.e)
+
+    # Setup simulation parameters
+    t_begin = 0.     # Starting time in years
+
+    P = 2.*math.pi*math.sqrt(opt.a**3/(opt.M+opt.m)) # Orbital period (remember G=1 in our units)
+    dt_snap = P/100  # Snapshot output interval in years
+    dt = eta*P  # Timestep size
+
+    t = t_begin # Current time variable
+    t_snap = dt_snap # Time for the next snapshot to be written away
+
+    # Initial statistics and coordinates
+    E0 = kepler_system.calc_energy() # Calculate initial total energy
+    t_E = [t/(2*math.pi)] # Keep an array of the time
+    dE  = [0.] # and relative energy conservation |(E(t)-E0)/E0|
+
+    coordinates = [kepler_system.get_coordinates()] # Keep an array of all snapshots in time
+                                                    # e.g. all coordinates of both objects in time
+                                                    # This will be used for the table
+    # Evolve the kepler system
+    while t < t_end: # Time loop
+        kepler_system.step(dt) # Perform an integration step
+        t += dt # Update current time
+
+        if t >= t_snap: # If time for a snapshot output,
+            E = kepler_system.calc_energy() # Calculate current total energy
+            dE_rel = abs((E-E0)/E0) # Calculate relative energy error
+            t_E.append(t/(2*math.pi)) # Add new time to array
+            dE.append(dE_rel) # Add new energy error to array
+
+            coordinates.append(kepler_system.get_coordinates()) # Add current coordinates to array  
+
+            t_snap += dt_snap # Update to time for next snapshot
+            if t_snap > t_end: # Final snapshot should be at the final simulation time
+                t_snap = t_end
+
+            print(sys.stderr, t/(2*math.pi), '/', t_end/(2*math.pi), '[yr]') # Output current time terminal
+
+    # Print mastertable to file (opt.f), which can be used for post-processing (plots, animations)
+    fo = open(opt.f, "w")
+    
+    fo.write("# T[yr] dE/E m1[MSun] x1[AU] y1[AU] z1[AU] vx1[2piAU/yr] vy1[2piAU/yr] vz1[2piAU/yr] m2[MSun] x2[AU] y2[AU] z2[AU] vx2[2piAU/yr] vy2[2piAU/yr] vz2[2piAU/yr]\n")
+    for i in range(len(t_E)):
+        fo.write( str(t_E[i]) + " " + str(dE[i]) + " ") 
+        for j in range(len(coordinates[i])):
+            fo.write(str(coordinates[i][j]) + " ") 
+        fo.write("\n")
+
+    fo.close()
