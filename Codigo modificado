@@ -1,0 +1,102 @@
+"""
+This script reads a table (the output from the n-body integrations)
+and plots the relative energy errors as a function of time.
+"""
+
+# Import some Python libraries
+import sys, math, argparse
+import matplotlib.pyplot as pyplot
+from pylab import *
+
+# Function that reads the input file into a table
+def read_table(filename):
+    infile = open(filename, "r")	# open file
+    data = [] 				# declare data container  
+
+    while True:				# while data to read
+        line = infile.readline()	# read data
+        if not line:
+            break
+        line = line.split()		# distinguish columns
+        if len(line) > 0: 
+            if line[0][0] is not '#':
+                data.append(line)	# put data in container
+
+    infile.close()			# close file
+
+    data = zip(*data)			# inverse rows and columns
+    data = [list(x) for x in data]      # make list type    
+
+    for i in range(len(data)):
+        for j in range(len(data[i])):
+            data[i][j] = float(data[i][j]) # Convert all data input into floats
+
+    return data				# return data
+
+# Function to read in the command line arguments
+def get_options():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-f", type=str, help="Input file with the table", default="table.out")
+    parser.add_argument("-F", type=str, help="Output file for the plot", default="dE_vs_t.pdf")
+
+    args = parser.parse_args()
+    return args
+
+# Main function
+if __name__ == "__main__":
+
+    opt = get_options() # Get the command line arguments
+
+    data = read_table(opt.f) # Read the input file into a table
+
+    t = data[0] # data[0] = time array
+    dE = data[1] # data[1] = relative energy error array
+   
+    # Make a plot of dE vs t
+    fig = pyplot.figure()
+    ax = fig.add_subplot(1,1,1)
+
+    ax.set_xlabel(r"$\rm{T\,[yr]}$", fontsize=16)
+    ax.set_ylabel(r"$\rm{dE/E}$", fontsize=16)
+
+    ax.axis([0, max(t), 1e-4, 1])
+
+    #ax.set_xscale('log')
+    ax.set_yscale('log')
+
+    ax.plot(t, dE, color='black', ls='-', label=r'$\rm{Label}$')
+
+    legend(loc=4)
+
+    file_out = opt.F
+    savefig('file.out.png')
+    """
+    Aqui añado yo un propio if que contiene algunos datos copiados del if de arriba
+    pero modificados de tal manera que grafiquen las orbitas del sol y la tierra
+
+    """
+if __name__ == "__main__":
+    opt = get_options() # Get the command line arguments
+
+    data = read_table(opt.f) # Read the input file into a table
+    x = data[3] #posiciones sol
+    y = data[4] 
+
+    x2= data[10] #posiciones tierra
+    y2= data[11] 
+    fig = pyplot.figure() 
+    ax = fig.add_subplot(1,1,1) #Añado la figura
+    ax.set_xlabel(r"$\rm{x\,[AU]}$", fontsize=16) #Añado la etiqueta del eje x que es distancia en UA
+    ax.set_ylabel(r"$\rm{y\,[AU]}$", fontsize=16) #Añado la etiqueta del eje y que es distancia en UA
+    ax.axis([-3,3,-3,3]) #Defino el tamaño del cuadrado donde se veran las orbitas
+    ax.plot(x,y, color='black', ls='-') #Ploteo al sol
+    ax.plot(x2,y2, color='black', ls='-') #Ploteo la orbita de la tierra
+    ax.scatter(x2[-1], y2[-1], color='blue', s=50, label='Tierra') #Añado un punto al final de la órbita de la tierra, por eso le pongo el [-1] que en python
+    #accede al ultimo dato de la lista de posiciones de la tierra
+    ax.scatter(x, y, color='orange', s=50, label='Sol') #Añado un punto en la posicion del sol, que no se mueve
+    ax.text(2, -2, 'T=4 [yr]', fontsize=12, color='black') #Añado el tiempo en el plot
+    # Mostrar la leyenda
+    ax.legend()
+    savefig('file2.out.png') #Guardar la figura
+    show() #Mostrarla
